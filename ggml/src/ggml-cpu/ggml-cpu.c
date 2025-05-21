@@ -2874,6 +2874,25 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
 
         ggml_compute_forward(&params, node);
 
+
+        if(node->op == 38) {
+            struct ggml_tensor * src1 = node->src[0];
+            struct ggml_tensor * src2 = node->src[1];
+            printf("Dest node, type and op : %d %s %d\n", node->type, node->name, node->op);
+            printf("Src1 node, type and op : %d %s %d\n", src1->type, src1->name,  src1->op);
+            printf("Src2 node, type and op : %d %s %d\n", src2->type, src2->name, src2->op);
+            if (src1->type  == 2) {
+                printf("\n  ggml_graph_compute q4_0 src0->name: %s, src0->type: %d", src1->name, src1->type);
+                block_q4_0* data  = (block_q4_0*) src1->data;
+                for (int i=0; i<5; i++) {
+                    printf("\n");
+                    for (int j=0; j<5; j++) {
+                        printf("\t printing the quants of src0: %hhu", data[i].qs[j]);
+                    }
+                }
+            }
+        }
+
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
             atomic_store_explicit(&tp->abort, node_n + 1, memory_order_relaxed);

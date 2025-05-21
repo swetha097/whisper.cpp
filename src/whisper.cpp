@@ -1461,6 +1461,14 @@ static bool weight_buft_supported(const whisper_hparams & hparams, ggml_tensor *
                 w->buffer = nullptr;
                 break;
             }
+            // case GGML_OP_GET_ROWS: {
+            //     // printf("GGMLOP_GET_ROWS: Loading Weights: TensorExpectedType=%d (%s)", w->type,    ggml_type_name(w->type));
+            //     if (w->type == 2)
+            //         op_supported = true; // only supported for q4_0 type & repacked weights
+            //     else
+            //         op_supported = false; 
+            //     break;
+            // }
             default: {
                 op_supported = false;
                 break;

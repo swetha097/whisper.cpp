@@ -6061,12 +6061,160 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             case GGML_OP_MUL_MAT_ID:
                 forward_mul_mat_id(params, op);
                 return true;
+            case GGML_OP_GET_ROWS:
+                printf("\n in func - GGML_OP_GET_ROWS");
+                printf ("\n GGML_OP_GET_ROWS arch64.cpp file!!!");
+                forward_get_rows(params, op);
+                return true;
             default:
                 // GGML_ABORT("fatal error");
                 break;
         }
         return false;
     }
+
+    void forward_get_rows(const ggml_compute_params * params,
+        ggml_tensor * dst) {
+    
+            const ggml_tensor * src0 = dst->src[0];
+    
+            switch (src0->type) {
+                case GGML_TYPE_Q4_0:
+                {
+                    printf("SUCCESS!");
+                    ggml_compute_forward_get_rows_q4_0_x8(params, dst);
+                } break;
+                default:
+                // GGML_ABORT("fatal error");
+                break;
+            }
+        }
+
+
+        static void ggml_compute_forward_get_rows_q4_0_x8(
+            const ggml_compute_params * params,
+                  ggml_tensor * dst) {
+    
+            const ggml_tensor * src0 = dst->src[0];
+            const ggml_tensor * src1 = dst->src[1];
+    
+            GGML_TENSOR_BINARY_OP_LOCALS
+    
+            const int64_t nc = ne00;
+            const int64_t nr = ggml_nelements(src1);
+    
+            const ggml_type type = src0->type;
+            // ggml_to_float_t const dequantize_row_q = ggml_get_type_traits(type)->to_float;
+    
+            assert(ne0  == nc);
+            assert(ne02 == ne11);
+            assert(nb00 == ggml_type_size(type));
+            assert(ggml_nrows(dst) == nr);
+            
+            const int ith = params->ith;
+            const int nth = params->nth;
+    
+            // rows per thread
+            const int dr = (nr + nth - 1)/nth;
+    
+            // row range for this thread
+            const int ir0 = dr*ith;
+            const int ir1 = MIN(ir0 + dr, nr);
+    
+            uint nrows_interleaved = 8; // Get this value from q4_0x8 ?
+            int stride_between_row_grps_in_src0 = src0->nb[1];
+            // (ne01 * ne02) / nrows_interleaved; //reverify - is it src0->nb[1];
+            for (int64_t i = ir0; i < ir1; ++i) {
+                const int64_t i12 = i/(ne11*ne10);
+                const int64_t i11 = (i - i12*ne11*ne10)/ne10;
+                const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10);
+                const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12); // original logical row
+    
+                GGML_ASSERT(i01 >= 0 && i01 < ne01);
+    
+                int row_group_idx = i01 / nrows_interleaved;  
+                const int row_idx_in_group = i01 % nrows_interleaved;
+    
+                const char * base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 +  i12 * nb03;
+                
+                // Pointer to the first block_q4_0x8 of the identified row_group_idx  
+                const block_q4_0x8 * p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_row_grps_in_src0);  
+    
+                dequantize_row_q4_0x8(
+                        p_first_repacked_block_of_group_x8,
+                            (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc, row_idx_in_group);
+            }
+        }
+    
+    
+    /**
+     * Dequantizes a single logical row from data repacked with "Interpretation C" quant interleaving.
+     * (Half-block interleaving: all first_halves then all second_halves)
+     *
+     * @param p_repacked_group_column_blocks Pointer to the start of 'block_q4_0x8'
+     *                                       for the row group.
+     * @param y                              Output buffer for the dequantized float values.
+     * @param k                              Total number of elements (columns) in the logical row.
+     * @param row_idx_in_group               Index (0-7) of the logical row to dequantize.
+     */
+    static void dequantize_row_q4_0x8(
+        const block_q4_0x8 * GGML_RESTRICT p_repacked_group_column_blocks,
+        float * GGML_RESTRICT y,
+        int64_t k,
+        int row_idx_in_group ) {
+        
+        int GGML_Q4_0_X8_INTERLEAVE_SIZE = 8;
+        assert(k % QK4_0 == 0);
+        assert(row_idx_in_group >= 0 && row_idx_in_group < GGML_Q4_0_X8_INTERLEAVE_SIZE);
+
+        const int num_column_blocks = k / QK4_0;
+        const int num_bytes_in_half_block_quants = (QK4_0 / 2) / 2; // 16 bytes total / 2 = 8 bytes per half
+        const int total_bytes_for_all_first_halves = num_bytes_in_half_block_quants * GGML_Q4_0_X8_INTERLEAVE_SIZE; // 8 bytes/half * 8 rows = 64 bytes
+
+        for (int i = 0; i < num_column_blocks; ++i) { // 'i' is the column block index (C0, C1, ...)
+            const block_q4_0x8 * current_column_repacked_block = &p_repacked_group_column_blocks[i];
+
+            const float d_val = GGML_FP16_TO_FP32(current_column_repacked_block->d[row_idx_in_group]);
+            float *y_curr = y + i * QK4_0; // Output pointer for this QK4_0 segment
+
+
+            // const uint8_t *qs_first_half_start = current_column_repacked_block->qs +
+            //                                     (row_idx_in_group * num_bytes_in_half_block_quants);
+            const int8_t *qs_first_half_start = & (current_column_repacked_block->qs[row_idx_in_group * num_bytes_in_half_block_quants]);
+
+            for (int j = 0; j < num_bytes_in_half_block_quants; ++j) { // j loops 0 to 7
+                // j is the index within the half-block of quants.
+                // This byte is original_qs[j] for the target row.
+                const uint8_t current_quant_byte = qs_first_half_start[j];
+
+                const int x0 = (current_quant_byte & 0x0F) - 8;
+                const int x1 = (current_quant_byte >> 4) - 8;
+
+                y_curr[j + 0]                = x0 * d_val;
+                y_curr[j + (QK4_0 / 2)] = x1 * d_val; // j + 16
+            }
+
+
+            // const uint8_t *qs_second_half_start = current_column_repacked_block->qs +
+            //                                     total_bytes_for_all_first_halves +
+            //                                     (row_idx_in_group * num_bytes_in_half_block_quants);
+            const int8_t *qs_second_half_start = & (current_column_repacked_block->qs[total_bytes_for_all_first_halves + (row_idx_in_group * num_bytes_in_half_block_quants)]);
+            for (int j = 0; j < num_bytes_in_half_block_quants; ++j) { // j loops 0 to 7
+                // j is the index within this *second half-block* of quants.
+                // This byte is original_qs[j + 8] (or original_qs[j + num_bytes_in_half_block_quants]) for the target row.
+                const uint8_t current_quant_byte = qs_second_half_start[j];
+
+                const int x0 = (current_quant_byte & 0x0F) - 8;
+                const int x1 = (current_quant_byte >> 4) - 8;
+
+                int orig_j = j + num_bytes_in_half_block_quants; // This will be 8, 9, ..., 15
+
+                y_curr[orig_j + 0]                = x0 * d_val;
+                y_curr[orig_j + (QK4_0 / 2)] = x1 * d_val; // orig_j + 16
+            }
+        }
+    }
+
 
     void forward_mul_mat(ggml_compute_params * params, ggml_tensor * op) {
         const ggml_tensor * src0 = op->src[0];
@@ -6403,7 +6551,7 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
     }
 
     ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
-        if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_MUL_MAT_ID) {
+        if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_MUL_MAT_ID || op->op == GGML_OP_GET_ROWS) {
             if (op->src[0]->buffer && op->src[0]->buffer->buft == ggml_backend_cpu_aarch64_buffer_type()) {
                 return (ggml::cpu::tensor_traits *) op->src[0]->extra;
             }

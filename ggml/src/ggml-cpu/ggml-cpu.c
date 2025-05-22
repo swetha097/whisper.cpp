@@ -2907,11 +2907,12 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             if (node->type == 0 && src1->type == 2) {
                 float* data = (float*) (dst);
                 printf("\n  printing the quants of dst: ");
-                    for (int i=0; i<25; i++) {
+                    for (int i=0; i<1024; i++) {
                         printf("\t %lf", data[i]);
                 }
                 // printf("\n");
             }
+        // exit(0);
         }
 
         if (state->ith == 0 && cplan->abort_callback &&

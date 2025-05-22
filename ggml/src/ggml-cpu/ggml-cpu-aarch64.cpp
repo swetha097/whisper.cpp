@@ -5382,7 +5382,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                     ggml_compute_forward_get_rows_q4_0_x8(params, dst);
                 } break;
                 default:
-                // GGML_ABORT("fatal error");
+                GGML_ABORT("fatal error");
                 break;
             }
         }
@@ -5419,7 +5419,17 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             const int ir1 = MIN(ir0 + dr, nr);
     
             uint nrows_interleaved = 8; // Get this value from q4_0x8 ?
-            int stride_between_row_grps_in_src0 = src0->nb[1];
+            // int stride_between_row_grps_in_src0 = src0->nb[1];
+             // Calculate the size of one repacked block (e.g., my_defined_repacked_block_q4_0x8)
+            const size_t sizeof_one_repacked_block = sizeof(block_q4_0x8); // e.g., 144 bytes
+
+            // Calculate the number of such repacked blocks per original logical row's width
+            // This is also the number of repacked blocks per row_group along the column dimension.
+            const int num_repacked_blocks_per_row_width = nc/32 ; // 512 / 32 = 16
+
+            // STRIDE between the start of one group of 8 rows and the next group of 8 rows.
+            // This is how many bytes a full group of 8 rows (all their column blocks) occupies.
+            const size_t stride_between_actual_row_groups = num_repacked_blocks_per_row_width * sizeof_one_repacked_block;
             // (ne01 * ne02) / nrows_interleaved; //reverify - is it src0->nb[1];
             for (int64_t i = ir0; i < ir1; ++i) {
                 const int64_t i12 = i/(ne11*ne10);
@@ -5428,14 +5438,20 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12); // original logical row
     
                 GGML_ASSERT(i01 >= 0 && i01 < ne01);
-    
+                printf("\n logical row i01:: %ld", i01);
+                // printf("\n logical row i01: %" PRId64 "\n", i01);
                 int row_group_idx = i01 / nrows_interleaved;  
                 const int row_idx_in_group = i01 % nrows_interleaved;
     
                 const char * base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 +  i12 * nb03;
                 
+
+                printf ("\n i11 ::%ld , i12 ::%ld , nb02::%ld , nb03::%ld,  stride to skip - %ld",i11, i12, nb02, nb03, i11 * nb02 +  i12 * nb03);
+                printf("\n row_group_idx:: %ld , src0->nb[1] :: %d", row_group_idx, nb01);
+                printf("\n row_group_idx * stride_between_row_grps_in_src0 -%ld ", row_group_idx * stride_between_actual_row_groups);
+                printf("\n stride_between_actual_row_groups::  %ld , sizeof_one_repacked_block ::  %ld", stride_between_actual_row_groups, sizeof_one_repacked_block);
                 // Pointer to the first block_q4_0x8 of the identified row_group_idx  
-                const block_q4_0x8 * p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_row_grps_in_src0);  
+                const block_q4_0x8 * p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);  
     
                 dequantize_row_q4_0x8(
                         p_first_repacked_block_of_group_x8,
@@ -5465,49 +5481,56 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         assert(row_idx_in_group >= 0 && row_idx_in_group < GGML_Q4_0_X8_INTERLEAVE_SIZE);
 
         const int num_column_blocks = k / QK4_0;
-        const int num_bytes_in_half_block_quants = (QK4_0 / 2) / 2; // 16 bytes total / 2 = 8 bytes per half
-        const int total_bytes_for_all_first_halves = num_bytes_in_half_block_quants * GGML_Q4_0_X8_INTERLEAVE_SIZE; // 8 bytes/half * 8 rows = 64 bytes
+        const int num_bytes_in_half_block_quants = (QK4_0 / 2) / 2; // 8
+        const int total_bytes_for_all_first_halves = num_bytes_in_half_block_quants * 8; // 64
 
-        for (int i = 0; i < num_column_blocks; ++i) { // 'i' is the column block index (C0, C1, ...)
+        const uint64_t xor_mask = 0x8888888888888888ULL; // The same mask
+
+        for (int i = 0; i < num_column_blocks; ++i) {
             const block_q4_0x8 * current_column_repacked_block = &p_repacked_group_column_blocks[i];
-
             const float d_val = GGML_FP16_TO_FP32(current_column_repacked_block->d[row_idx_in_group]);
-            float *y_curr = y + i * QK4_0; // Output pointer for this QK4_0 segment
+            float *y_curr = y + i * QK4_0;
 
+            // --- Process the "first half" ---
+            // Pointer to the start of the (XORed) first 8 bytes of quants for the target row
+            const int8_t *qs_first_half_repacked_ptr = &(current_column_repacked_block->qs[row_idx_in_group * num_bytes_in_half_block_quants]);
+            
+            uint64_t first_half_chunk_u64;
+            memcpy(&first_half_chunk_u64, qs_first_half_repacked_ptr, sizeof(uint64_t));
+            first_half_chunk_u64 ^= xor_mask; // Reverse the XOR
 
-            // const uint8_t *qs_first_half_start = current_column_repacked_block->qs +
-            //                                     (row_idx_in_group * num_bytes_in_half_block_quants);
-            const int8_t *qs_first_half_start = & (current_column_repacked_block->qs[row_idx_in_group * num_bytes_in_half_block_quants]);
+            // Now, first_half_chunk_u64 contains the original 8 bytes of qs[0..7]
+            // We need to access these byte by byte.
+            const uint8_t *original_qs_first_half_bytes = (const uint8_t *)&first_half_chunk_u64;
 
             for (int j = 0; j < num_bytes_in_half_block_quants; ++j) { // j loops 0 to 7
-                // j is the index within the half-block of quants.
-                // This byte is original_qs[j] for the target row.
-                const uint8_t current_quant_byte = qs_first_half_start[j];
+                const uint8_t current_quant_byte = original_qs_first_half_bytes[j]; // Get the j-th original byte
 
                 const int x0 = (current_quant_byte & 0x0F) - 8;
                 const int x1 = (current_quant_byte >> 4) - 8;
 
                 y_curr[j + 0]                = x0 * d_val;
-                y_curr[j + (QK4_0 / 2)] = x1 * d_val; // j + 16
+                y_curr[j + (QK4_0 / 2)] = x1 * d_val;
             }
 
+            // --- Process the "second half" ---
+            const int8_t *qs_second_half_repacked_ptr = &(current_column_repacked_block->qs[total_bytes_for_all_first_halves + (row_idx_in_group * num_bytes_in_half_block_quants)]);
 
-            // const uint8_t *qs_second_half_start = current_column_repacked_block->qs +
-            //                                     total_bytes_for_all_first_halves +
-            //                                     (row_idx_in_group * num_bytes_in_half_block_quants);
-            const int8_t *qs_second_half_start = & (current_column_repacked_block->qs[total_bytes_for_all_first_halves + (row_idx_in_group * num_bytes_in_half_block_quants)]);
+            uint64_t second_half_chunk_u64;
+            memcpy(&second_half_chunk_u64, qs_second_half_repacked_ptr, sizeof(uint64_t));
+            second_half_chunk_u64 ^= xor_mask; // Reverse the XOR
+
+            const uint8_t *original_qs_second_half_bytes = (const uint8_t *)&second_half_chunk_u64;
+
             for (int j = 0; j < num_bytes_in_half_block_quants; ++j) { // j loops 0 to 7
-                // j is the index within this *second half-block* of quants.
-                // This byte is original_qs[j + 8] (or original_qs[j + num_bytes_in_half_block_quants]) for the target row.
-                const uint8_t current_quant_byte = qs_second_half_start[j];
+                const uint8_t current_quant_byte = original_qs_second_half_bytes[j]; // Get the j-th original byte (from the second half)
 
                 const int x0 = (current_quant_byte & 0x0F) - 8;
                 const int x1 = (current_quant_byte >> 4) - 8;
 
-                int orig_j = j + num_bytes_in_half_block_quants; // This will be 8, 9, ..., 15
-
+                int orig_j = j + num_bytes_in_half_block_quants;
                 y_curr[orig_j + 0]                = x0 * d_val;
-                y_curr[orig_j + (QK4_0 / 2)] = x1 * d_val; // orig_j + 16
+                y_curr[orig_j + (QK4_0 / 2)] = x1 * d_val;
             }
         }
     }

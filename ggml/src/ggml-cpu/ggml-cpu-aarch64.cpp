@@ -6546,6 +6546,12 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
             //if (op->src[1]->type == GGML_TYPE_Q8_0) {
             //    return true;
             //}
+        } else if (op->op == GGML_OP_GET_ROWS 
+            && op->src[0]->buffer
+            && op->src[0]->buffer->buft == ggml_backend_cpu_aarch64_buffer_type() 
+            && ggml_aarch64_get_optimal_repack_type(op->src[0])
+        ) {
+            return true;
         }
         return false;
     }

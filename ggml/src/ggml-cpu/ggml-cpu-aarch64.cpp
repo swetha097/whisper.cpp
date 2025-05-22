@@ -6144,7 +6144,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12); // original logical row
     
                 GGML_ASSERT(i01 >= 0 && i01 < ne01);
-                printf("\n logical row i01:: %ld", i01);
+                // printf("\n logical row i01:: %ld", i01);
                 // printf("\n logical row i01: %" PRId64 "\n", i01);
                 int row_group_idx = i01 / nrows_interleaved;  
                 const int row_idx_in_group = i01 % nrows_interleaved;
@@ -6152,10 +6152,10 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 const char * base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 +  i12 * nb03;
                 
 
-                printf ("\n i11 ::%ld , i12 ::%ld , nb02::%ld , nb03::%ld,  stride to skip - %ld",i11, i12, nb02, nb03, i11 * nb02 +  i12 * nb03);
-                printf("\n row_group_idx:: %ld , src0->nb[1] :: %d", row_group_idx, nb01);
-                printf("\n row_group_idx * stride_between_row_grps_in_src0 -%ld ", row_group_idx * stride_between_actual_row_groups);
-                printf("\n stride_between_actual_row_groups::  %ld , sizeof_one_repacked_block ::  %ld", stride_between_actual_row_groups, sizeof_one_repacked_block);
+                // printf ("\n i11 ::%ld , i12 ::%ld , nb02::%ld , nb03::%ld,  stride to skip - %ld",i11, i12, nb02, nb03, i11 * nb02 +  i12 * nb03);
+                // printf("\n row_group_idx:: %ld , src0->nb[1] :: %d", row_group_idx, nb01);
+                // printf("\n row_group_idx * stride_between_row_grps_in_src0 -%ld ", row_group_idx * stride_between_actual_row_groups);
+                // printf("\n stride_between_actual_row_groups::  %ld , sizeof_one_repacked_block ::  %ld", stride_between_actual_row_groups, sizeof_one_repacked_block);
                 // Pointer to the first block_q4_0x8 of the identified row_group_idx  
                 const block_q4_0x8 * p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);  
     

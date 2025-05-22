@@ -2869,27 +2869,49 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.threadpool=*/ tp,
     };
 
+    printf ("\n cgraph->n_nodes :: %ld ", cgraph->n_nodes);
+    int count_op_get_rows = 0;
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
 
+        
+        if(node->op == 38) {
+            printf ("\n GET_ROWS before the ggml_compute_graph");
+            count_op_get_rows++;
+        }
         ggml_compute_forward(&params, node);
 
 
         if(node->op == 38) {
             struct ggml_tensor * src1 = node->src[0];
             struct ggml_tensor * src2 = node->src[1];
+            struct ggml_tensor * dst = node->data;
+            // {
+            //     /* data */
+            // };
+            
             printf("Dest node, type and op : %d %s %d\n", node->type, node->name, node->op);
             printf("Src1 node, type and op : %d %s %d\n", src1->type, src1->name,  src1->op);
             printf("Src2 node, type and op : %d %s %d\n", src2->type, src2->name, src2->op);
-            if (src1->type  == 2) {
-                printf("\n  ggml_graph_compute q4_0 src0->name: %s, src0->type: %d", src1->name, src1->type);
-                block_q4_0* data  = (block_q4_0*) src1->data;
-                for (int i=0; i<5; i++) {
-                    printf("\n");
-                    for (int j=0; j<5; j++) {
-                        printf("\t printing the quants of src0: %hhu", data[i].qs[j]);
-                    }
+            // printf("Dst node, type and op : %d %s %d\n", dst->type, dst->name, dst->op);
+            // if (src1->type  == 2) {
+            //     printf("\n  ggml_graph_compute q4_0 src0->name: %s, src0->type: %d", src1->name, src1->type);
+            //     block_q4_0* data  = (block_q4_0*) src1->data;
+            //     for (int i=0; i<5; i++) {
+            //         printf("\n");
+            //         for (int j=0; j<5; j++) {
+            //             printf("\t printing the quants of src0: %hhu", data[i].qs[j]);
+            //         }
+            //     }
+            // }
+
+            if (node->type == 0 && src1->type == 2) {
+                float* data = (float*) (dst);
+                printf("\n  printing the quants of dst: ");
+                    for (int i=0; i<25; i++) {
+                        printf("\t %lf", data[i]);
                 }
+                // printf("\n");
             }
         }
 
@@ -2904,8 +2926,9 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         }
     }
 
+    
     ggml_barrier(state->threadpool);
-
+    printf ("\n count_op_get_rows :: %ld ", count_op_get_rows);
     return 0;
 }
 

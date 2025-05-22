@@ -6046,6 +6046,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 size = GGML_PAD(size, sizeof(int64_t));  // + padding for next bloc.
                 size += sizeof(int64_t) * (1+op->src[0]->ne[2]) * op->src[1]->ne[2];
                 return true;
+            case GGML_OP_GET_ROWS:
+                size = 0;  // GET_ROWS (standard and repacked) doesn't need a work buffer
+                return true;
             default:
                 // GGML_ABORT("fatal error");
                 break;
@@ -6548,9 +6551,13 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
             //}
         } else if (op->op == GGML_OP_GET_ROWS 
             && op->src[0]->buffer
+            && (ggml_n_dims(op->src[0]) == 4)
             && op->src[0]->buffer->buft == ggml_backend_cpu_aarch64_buffer_type() 
             && ggml_aarch64_get_optimal_repack_type(op->src[0])
         ) {
+            if (op->src[1]->buffer && !ggml_backend_buft_is_host(op->src[1]->buffer->buft)) {
+                return false;
+            }
             return true;
         }
         return false;

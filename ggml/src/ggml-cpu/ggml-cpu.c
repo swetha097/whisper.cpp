@@ -2868,7 +2868,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.threadpool=*/ tp,
     };
 
-    printf ("\n cgraph->n_nodes :: %ld ", cgraph->n_nodes);
+    // printf ("\n cgraph->n_nodes :: %ld ", cgraph->n_nodes);
     int count_op_get_rows = 0;
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];

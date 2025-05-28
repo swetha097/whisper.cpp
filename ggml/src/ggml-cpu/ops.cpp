@@ -4271,7 +4271,6 @@ static void ggml_compute_forward_get_rows_q(
 
 
         GGML_ASSERT(i01 >= 0 && i01 < ne01);
-        printf("\n logical row i01:: %ld", i01);
         dequantize_row_q(
                 (const void *) ((char *) src0->data + i01*nb01 + i11*nb02 + i12*nb03),
                      (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc);

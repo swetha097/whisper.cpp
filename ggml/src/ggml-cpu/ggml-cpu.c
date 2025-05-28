@@ -2926,8 +2926,8 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         }
     }
 
-    
     ggml_barrier(state->threadpool);
+
     return 0;
 }
 

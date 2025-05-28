@@ -5359,8 +5359,6 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 forward_mul_mat_id(params, op);
                 return true;
             case GGML_OP_GET_ROWS:
-                // printf("\n in func - GGML_OP_GET_ROWS");
-                // printf ("\n GGML_OP_GET_ROWS arch64.cpp file!!!");
                 forward_get_rows(params, op);
                 return true;
             default:

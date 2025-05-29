@@ -6074,81 +6074,75 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         return false;
     }
 
-    void forward_get_rows(const ggml_compute_params * params,
-        ggml_tensor * dst) {
-    
-            const ggml_tensor * src0 = dst->src[0];
-    
-            switch (src0->type) {
-                case GGML_TYPE_Q4_0:
-                {
-                    ggml_compute_forward_get_rows_q4_0_x8(params, dst);
-                } break;
-                default:
+    void forward_get_rows(const ggml_compute_params *params,
+                          ggml_tensor *dst) {
+        const ggml_tensor *src0 = dst->src[0];
+
+        switch (src0->type) {
+            case GGML_TYPE_Q4_0: {
+                ggml_compute_forward_get_rows_q4_0x8(params, dst);
+            } break;
+            default:
                 GGML_ABORT("fatal error");
                 break;
-            }
         }
+    }
 
+    static void ggml_compute_forward_get_rows_q4_0x8(
+        const ggml_compute_params *params,
+        ggml_tensor *dst) {
+        const ggml_tensor *src0 = dst->src[0];
+        const ggml_tensor *src1 = dst->src[1];
 
-        static void ggml_compute_forward_get_rows_q4_0_x8(
-            const ggml_compute_params * params,
-                  ggml_tensor * dst) {
-    
-            const ggml_tensor * src0 = dst->src[0];
-            const ggml_tensor * src1 = dst->src[1];
-    
-            GGML_TENSOR_BINARY_OP_LOCALS
-    
-            const int64_t nc = ne00;
-            const int64_t nr = ggml_nelements(src1);
-    
-    
-            assert(ne0  == nc);
-            assert(ne02 == ne11);
-            assert(nb00 == ggml_type_size(src0->type));
-            assert(ggml_nrows(dst) == nr);
-            
-            const int ith = params->ith;
-            const int nth = params->nth;
-    
-            // rows per thread
-            const int dr = (nr + nth - 1)/nth;
-    
-            // row range for this thread
-            const int ir0 = dr*ith;
-            const int ir1 = MIN(ir0 + dr, nr);
-    
-            uint nrows_interleaved = 8;
-            const size_t sizeof_one_repacked_block = sizeof(block_q4_0x8);
+        GGML_TENSOR_BINARY_OP_LOCALS
 
-            const int num_repacked_blocks_per_row_width = nc / QK4_0 ;
+        const int64_t nc = ne00;
+        const int64_t nr = ggml_nelements(src1);
 
-            const size_t stride_between_actual_row_groups = num_repacked_blocks_per_row_width * sizeof_one_repacked_block;
+        assert(ne0 == nc);
+        assert(ne02 == ne11);
+        assert(nb00 == ggml_type_size(src0->type));
+        assert(ggml_nrows(dst) == nr);
 
-            for (int64_t i = ir0; i < ir1; ++i) {
-                const int64_t i12 = i/(ne11*ne10);
-                const int64_t i11 = (i - i12*ne11*ne10)/ne10;
-                const int64_t i10 = (i - i12*ne11*ne10 - i11*ne10);
-                const int64_t i01 = *(int32_t *) ((char *) src1->data + i10*nb10 + i11*nb11 + i12*nb12); // original logical row
-    
-                GGML_ASSERT(i01 >= 0 && i01 < ne01);
+        const int ith = params->ith;
+        const int nth = params->nth;
 
-                int row_group_idx = i01 / nrows_interleaved;  
-                const int row_idx_in_group = i01 % nrows_interleaved;
-    
-                const char * base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 +  i12 * nb03;
-                
-                // Pointer to the first block_q4_0x8 of the identified row_group_idx  
-                const block_q4_0x8 * p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);  
-    
-                dequantize_row_q4_0x8(
-                        p_first_repacked_block_of_group_x8,
-                            (float *) ((char *)  dst->data + i10*nb1  + i11*nb2  + i12*nb3), nc, row_idx_in_group);
-            }
+        // rows per thread
+        const int dr = (nr + nth - 1) / nth;
+
+        // row range for this thread
+        const int ir0 = dr * ith;
+        const int ir1 = MIN(ir0 + dr, nr);
+
+        uint nrows_interleaved = 8;
+        const size_t sizeof_one_repacked_block = sizeof(block_q4_0x8);
+
+        const int num_repacked_blocks_per_row_width = nc / QK4_0;
+
+        const size_t stride_between_actual_row_groups = num_repacked_blocks_per_row_width * sizeof_one_repacked_block;
+
+        for (int64_t i = ir0; i < ir1; ++i) {
+            const int64_t i12 = i / (ne11 * ne10);
+            const int64_t i11 = (i - i12 * ne11 * ne10) / ne10;
+            const int64_t i10 = (i - i12 * ne11 * ne10 - i11 * ne10);
+            const int64_t i01 = *(int32_t *)((char *)src1->data + i10 * nb10 + i11 * nb11 + i12 * nb12);  // original logical row
+
+            GGML_ASSERT(i01 >= 0 && i01 < ne01);
+
+            int row_group_idx = i01 / nrows_interleaved;
+            const int row_idx_in_group = i01 % nrows_interleaved;
+
+            const char *base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 + i12 * nb03;
+
+            // Pointer to the first block_q4_0x8 of the identified row_group_idx
+            const block_q4_0x8 *p_first_repacked_block_of_group_x8 = (const block_q4_0x8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);
+
+            dequantize_row_q4_0x8(
+                p_first_repacked_block_of_group_x8,
+                (float *)((char *)dst->data + i10 * nb1 + i11 * nb2 + i12 * nb3), nc, row_idx_in_group);
         }
-    
-    
+    }
+
     /**
      * Dequantizes a single logical row from data repacked with quant interleaving.
      *
@@ -6158,56 +6152,53 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
      * @param row_idx_in_group               Index (0-7) of the logical row to dequantize.
      */
     static void dequantize_row_q4_0x8(
-        const block_q4_0x8 * GGML_RESTRICT p_repacked_group_column_blocks,
-        float * GGML_RESTRICT y,
+        const block_q4_0x8 *GGML_RESTRICT p_repacked_group_column_blocks,
+        float *GGML_RESTRICT y,
         int64_t k,
         int row_idx_in_group) {
-    
         const int GGML_Q4_0_X8_INTERLEAVE_SIZE = 8;
         assert(k % QK4_0 == 0);
         assert(row_idx_in_group >= 0 && row_idx_in_group < GGML_Q4_0_X8_INTERLEAVE_SIZE);
-     
+
         const int nb = k / QK4_0;
         const int num_quant_bytes_for_half_elements = (QK4_0 / 2) / 2;
 
         const int offset_to_second_half_data = num_quant_bytes_for_half_elements * GGML_Q4_0_X8_INTERLEAVE_SIZE;
         const uint64_t xor_mask = 0x8888888888888888ULL;
         const int qk4_0_half_elements = QK4_0 / 2;
-     
+
         for (int i = 0; i < nb; ++i) {
-            const block_q4_0x8 * current_column_repacked_block = &p_repacked_group_column_blocks[i];
+            const block_q4_0x8 *current_column_repacked_block = &p_repacked_group_column_blocks[i];
             const float d_val = GGML_FP16_TO_FP32(current_column_repacked_block->d[row_idx_in_group]);
             float *y_curr = y + i * QK4_0;
 
             const int8_t *qs_first_half_repacked_ptr = &(current_column_repacked_block->qs[row_idx_in_group * num_quant_bytes_for_half_elements]);
-     
+
             uint64_t first_half_chunk_u64;
             memcpy(&first_half_chunk_u64, qs_first_half_repacked_ptr, sizeof(uint64_t));
-            first_half_chunk_u64 ^= xor_mask; // Reverse the XOR
+            first_half_chunk_u64 ^= xor_mask;  // Reverse the XOR
             const uint8_t *original_qs_first_half_bytes = (const uint8_t *)&first_half_chunk_u64;
 
             const int8_t *qs_second_half_repacked_ptr = &(current_column_repacked_block->qs[offset_to_second_half_data + (row_idx_in_group * num_quant_bytes_for_half_elements)]);
-     
+
             uint64_t second_half_chunk_u64;
             memcpy(&second_half_chunk_u64, qs_second_half_repacked_ptr, sizeof(uint64_t));
-            second_half_chunk_u64 ^= xor_mask; // Reverse the XOR
+            second_half_chunk_u64 ^= xor_mask;  // Reverse the XOR
             const uint8_t *original_qs_second_half_bytes = (const uint8_t *)&second_half_chunk_u64;
-     
-            // dequantizing all QK4_0 (e.g., 32) floats for this block.
-            for (int j = 0; j < num_quant_bytes_for_half_elements; ++j) {
 
+            // dequantizing all QK4_0's for this block.
+            for (int j = 0; j < num_quant_bytes_for_half_elements; ++j) {
                 const uint8_t quant_byte_first = original_qs_first_half_bytes[j];
-                y_curr[j]                               = ((quant_byte_first & 0x0F) - 8) * d_val;
-                y_curr[j + qk4_0_half_elements]         = ((quant_byte_first >> 4)   - 8) * d_val;
-     
+                y_curr[j] = ((quant_byte_first & 0x0F) - 8) * d_val;
+                y_curr[j + qk4_0_half_elements] = ((quant_byte_first >> 4) - 8) * d_val;
+
                 const uint8_t quant_byte_second = original_qs_second_half_bytes[j];
-                const int out_idx_base_second_half = j + num_quant_bytes_for_half_elements; // Offset for the second set of low nibbles
-                y_curr[out_idx_base_second_half]                       = ((quant_byte_second & 0x0F) - 8) * d_val;
-                y_curr[out_idx_base_second_half + qk4_0_half_elements] = ((quant_byte_second >> 4)   - 8) * d_val;
+                const int out_idx_base_second_half = j + num_quant_bytes_for_half_elements;  // Offset for the second set of low nibbles
+                y_curr[out_idx_base_second_half] = ((quant_byte_second & 0x0F) - 8) * d_val;
+                y_curr[out_idx_base_second_half + qk4_0_half_elements] = ((quant_byte_second >> 4) - 8) * d_val;
             }
         }
     }
-
 
     void forward_mul_mat(ggml_compute_params * params, ggml_tensor * op) {
         const ggml_tensor * src0 = op->src[0];

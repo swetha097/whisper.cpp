@@ -6114,7 +6114,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         const int ir0 = dr * ith;
         const int ir1 = MIN(ir0 + dr, nr);
 
-        uint nrows_interleaved = 8;
+        constexpr int nrows_interleaved = 8;
         const size_t sizeof_one_repacked_block = sizeof(block_q4_0x8);
 
         const int num_repacked_blocks_per_row_width = nc / QK4_0;

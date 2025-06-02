@@ -6161,9 +6161,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         assert(row_idx_in_group >= 0 && row_idx_in_group < GGML_Q4_0_X8_INTERLEAVE_SIZE);
 
         const int nb = k / QK4_0;
-        const int num_quant_bytes_for_half_elements = (QK4_0 / 2) / 2;
+        const int bytes_for_half_elements = (QK4_0 / 2) / 2;
 
-        const int offset_to_second_half_data = num_quant_bytes_for_half_elements * GGML_Q4_0_X8_INTERLEAVE_SIZE;
+        const int offset_to_second_half_data = bytes_for_half_elements * GGML_Q4_0_X8_INTERLEAVE_SIZE;
         const uint64_t xor_mask = 0x8888888888888888ULL;
         const int qk4_0_half_elements = QK4_0 / 2;
 
@@ -6172,14 +6172,14 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             const float d_val = GGML_FP16_TO_FP32(current_column_repacked_block->d[row_idx_in_group]);
             float *y_curr = y + i * QK4_0;
 
-            const int8_t *qs_first_half_repacked_ptr = &(current_column_repacked_block->qs[row_idx_in_group * num_quant_bytes_for_half_elements]);
+            const int8_t *qs_first_half_repacked_ptr = &(current_column_repacked_block->qs[row_idx_in_group * bytes_for_half_elements]);
 
             uint64_t first_half_chunk_u64;
             memcpy(&first_half_chunk_u64, qs_first_half_repacked_ptr, sizeof(uint64_t));
             first_half_chunk_u64 ^= xor_mask;  // Reverse the XOR
             const uint8_t *original_qs_first_half_bytes = (const uint8_t *)&first_half_chunk_u64;
 
-            const int8_t *qs_second_half_repacked_ptr = &(current_column_repacked_block->qs[offset_to_second_half_data + (row_idx_in_group * num_quant_bytes_for_half_elements)]);
+            const int8_t *qs_second_half_repacked_ptr = &(current_column_repacked_block->qs[offset_to_second_half_data + (row_idx_in_group * bytes_for_half_elements)]);
 
             uint64_t second_half_chunk_u64;
             memcpy(&second_half_chunk_u64, qs_second_half_repacked_ptr, sizeof(uint64_t));
@@ -6187,13 +6187,13 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             const uint8_t *original_qs_second_half_bytes = (const uint8_t *)&second_half_chunk_u64;
 
             // dequantizing all QK4_0's for this block.
-            for (int j = 0; j < num_quant_bytes_for_half_elements; ++j) {
+            for (int j = 0; j < bytes_for_half_elements; ++j) {
                 const uint8_t quant_byte_first = original_qs_first_half_bytes[j];
                 y_curr[j] = ((quant_byte_first & 0x0F) - 8) * d_val;
                 y_curr[j + qk4_0_half_elements] = ((quant_byte_first >> 4) - 8) * d_val;
 
                 const uint8_t quant_byte_second = original_qs_second_half_bytes[j];
-                const int out_idx_base_second_half = j + num_quant_bytes_for_half_elements;  // Offset for the second set of low nibbles
+                const int out_idx_base_second_half = j + bytes_for_half_elements;  // Offset for the second set of low nibbles
                 y_curr[out_idx_base_second_half] = ((quant_byte_second & 0x0F) - 8) * d_val;
                 y_curr[out_idx_base_second_half + qk4_0_half_elements] = ((quant_byte_second >> 4) - 8) * d_val;
             }
@@ -6532,14 +6532,16 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
             //}
         } else if (op->op == GGML_OP_GET_ROWS 
             && op->src[0]->buffer
-            && (ggml_n_dims(op->src[0]) == 4)
+            && (ggml_n_dims(op->src[0]) == 2)
             && op->src[0]->buffer->buft == ggml_backend_cpu_aarch64_buffer_type() 
             && ggml_aarch64_get_optimal_repack_type(op->src[0])
         ) {
             if (op->src[1]->buffer && !ggml_backend_buft_is_host(op->src[1]->buffer->buft)) {
                 return false;
             }
-            return true;
+            if (op->src[0]->type == GGML_TYPE_Q4_0) {
+                return true;
+            }
         }
         return false;
     }

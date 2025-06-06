@@ -1450,7 +1450,7 @@ static bool weight_buft_supported(const whisper_hparams & hparams, ggml_tensor *
         ggml_context * ctx = ctx_ptr.get();
 
         ggml_tensor * op_tensor = nullptr;
-        
+
         int64_t n_ctx = hparams.n_audio_ctx;
 
         switch (op) {

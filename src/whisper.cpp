@@ -1742,8 +1742,38 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
     // Create a list of available bufts, in priority order
     buft_list_t buft_list = make_buft_list(wctx.params);
 
+    // --- Add this logging block ---
+    printf("Whisper Model Load: Initialized Buffer Type Priority List (buft_list):\n");
+    if (buft_list.empty()) {
+        printf("  [Empty]\n");
+    } else {
+        for (size_t i = 0; i < buft_list.size(); ++i) {
+            ggml_backend_dev_t dev = buft_list[i].first;
+            ggml_backend_buffer_type_t buft = buft_list[i].second;
+
+            const char* buft_name = buft ? ggml_backend_buft_name(buft) : "NULL_BUFT";
+            const char* dev_name = dev ? ggml_backend_dev_name(dev) : "NULL_DEV";
+
+            printf("  [%zu]: Buffer Type: '%s', Associated Device: '%s'\n",
+                   i,
+                   buft_name,
+                   dev_name);
+        }
+    }
+    printf("---------------------------------------------------\n");
+    // --- End added logging block ---
+
     auto create_tensor = [&](asr_tensor type, asr_system system, ggml_tensor * meta, int layer = 0) -> ggml_tensor * {
         ggml_op op = ASR_TENSOR_INFO.at(type);
+        // --- Get the tensor name ---
+        std::string tensor_name_str = format(ASR_TENSOR_NAMES.at(system).at(type), layer);
+        // --- *** ADD PRINT STATEMENT HERE *** ---
+        printf("  [CREATE TENSOR] Tensor Name: %-45s | Associated OP: %s (%d)\n",
+               tensor_name_str.c_str(),
+               ggml_op_name(op), // Get the readable name of the OP
+               op);             // Print the numerical value of the OP enum
+        // --- *** END PRINT STATEMENT *** ---
+
         ggml_backend_buffer_type_t buft = select_weight_buft(hparams, meta, op, buft_list);
         if (!buft) {
             throw std::runtime_error(format("failed to find a compatible buffer type for tensor %s", ASR_TENSOR_NAMES.at(system).at(type)));
@@ -1928,7 +1958,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
             }
 
             auto tensor = model.tensors[name.data()];
-
+            
             if (ggml_nelements(tensor) != nelements) {
                 WHISPER_LOG_ERROR("%s: tensor '%s' has wrong size in model file\n", __func__, name.data());
                 WHISPER_LOG_ERROR("%s: shape: [%d, %d, %d], expected: [%d, %d, %d]\n",
@@ -1951,16 +1981,28 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
             }
 
             if (ggml_backend_buffer_is_host(tensor->buffer)) {
+                
+                printf("\n Not Repacked - Whisper Model Load: Loading Weights:  TypeFromFile=%d (%s), Name='%s', TensorExpectedType=%d (%s), ShapeFromFile=[%d,%d,%d,%d]\n",
+                   ttype,           ggml_type_name((ggml_type)ttype),
+                   name.c_str(),
+                   tensor->type,    ggml_type_name(tensor->type),
+                   ne[0], ne[1], ne[2], ne[3]);
                 // for the CPU and Metal backend, we can read directly into the tensor
                 loader->read(loader->context, tensor->data, ggml_nbytes(tensor));
                 BYTESWAP_TENSOR(tensor);
             } else {
                 // read into a temporary buffer first, then copy to device memory
+                
                 read_buf.resize(ggml_nbytes(tensor));
 
                 loader->read(loader->context, read_buf.data(), read_buf.size());
 
                 ggml_backend_tensor_set(tensor, read_buf.data(), 0, ggml_nbytes(tensor));
+                printf("\n Repacked! - Whisper Model Load: Loading Weights: TypeFromFile=%d (%s), Name='%s', TensorExpectedType=%d (%s), ShapeFromFile=[%d,%d,%d,%d]\n",
+                   ttype,           ggml_type_name((ggml_type)ttype),
+                   name.c_str(),
+                   tensor->type,    ggml_type_name(tensor->type),
+                   ne[0], ne[1], ne[2], ne[3]);
             }
 
             total_size += ggml_nbytes(tensor);
@@ -1982,7 +2024,7 @@ static bool whisper_model_load(struct whisper_model_loader * loader, whisper_con
     }
 
     wctx.t_load_us = ggml_time_us() - t_start_us;
-
+    // exit(0);
     return true;
 }
 

@@ -6082,6 +6082,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             case GGML_TYPE_Q4_0: {
                 ggml_compute_forward_get_rows_q4_0x8(params, dst);
             } break;
+            case GGML_TYPE_Q4_K: {
+                ggml_compute_forward_get_rows_q4_Kx8(params, dst);
+            } break;
             default:
                 GGML_ABORT("fatal error");
                 break;
@@ -6197,6 +6200,149 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 y_curr[out_idx_base_second_half] = ((quant_byte_second & 0x0F) - 8) * d_val;
                 y_curr[out_idx_base_second_half + qk4_0_half_elements] = ((quant_byte_second >> 4) - 8) * d_val;
             }
+        }
+    }
+
+
+    static void ggml_compute_forward_get_rows_q4_Kx8(
+        const ggml_compute_params *params,
+        ggml_tensor *dst) {
+        const ggml_tensor *src0 = dst->src[0];
+        const ggml_tensor *src1 = dst->src[1];
+
+        GGML_TENSOR_BINARY_OP_LOCALS
+
+        const int64_t nc = ne00;
+        const int64_t nr = ggml_nelements(src1);
+
+        assert(ne0 == nc);
+        assert(ne02 == ne11);
+        assert(nb00 == ggml_type_size(src0->type));
+        assert(ggml_nrows(dst) == nr);
+
+        const int ith = params->ith;
+        const int nth = params->nth;
+
+        // rows per thread
+        const int dr = (nr + nth - 1) / nth;
+
+        // row range for this thread
+        const int ir0 = dr * ith;
+        const int ir1 = MIN(ir0 + dr, nr);
+
+        constexpr int nrows_interleaved = 8;
+        const size_t sizeof_one_repacked_block = sizeof(block_q4_Kx8);
+
+        const int num_repacked_blocks_per_row_width = nc / QK_K;
+
+        const size_t stride_between_actual_row_groups = num_repacked_blocks_per_row_width * sizeof_one_repacked_block;
+
+        for (int64_t i = ir0; i < ir1; ++i) {
+            const int64_t i12 = i / (ne11 * ne10);
+            const int64_t i11 = (i - i12 * ne11 * ne10) / ne10;
+            const int64_t i10 = (i - i12 * ne11 * ne10 - i11 * ne10);
+            const int64_t i01 = *(int32_t *)((char *)src1->data + i10 * nb10 + i11 * nb11 + i12 * nb12);  // original logical row
+
+            GGML_ASSERT(i01 >= 0 && i01 < ne01);
+
+            int row_group_idx = i01 / nrows_interleaved;
+            const int row_idx_in_group = i01 % nrows_interleaved;
+
+            const char *base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 + i12 * nb03;
+
+            // Pointer to the first block_q4_Kx8 of the identified row_group_idx
+            const block_q4_Kx8 *p_first_repacked_block_of_group_x8 = (const block_q4_Kx8 *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);
+
+            dequantize_row_q4_Kx8(
+                p_first_repacked_block_of_group_x8,
+                (float *)((char *)dst->data + i10 * nb1 + i11 * nb2 + i12 * nb3), nc, row_idx_in_group);
+        }
+    }
+
+
+/**
+ * Dequantizes a single logical row from the repacked q4_Kx8 data format.
+ *
+ * @param p_repacked_blocks Pointer to the start of the 'block_q4_Kx8' structures for the entire row.
+ * @param y                 Output buffer for the dequantized float values.
+ * @param k                 Total number of elements (columns) in the logical row.
+ * @param row_idx_in_group  The index (0-7) of the logical row to extract from the interleaved data.
+ */
+
+static void dequantize_row_q4_Kx8(
+    const void * GGML_RESTRICT p_repacked_blocks,
+    float * GGML_RESTRICT y,
+    int64_t k,
+    int row_idx_in_group) {
+
+    assert(k % QK_K == 0);
+    assert(row_idx_in_group >= 0 && row_idx_in_group < 8);
+
+    const int num_blocks_in_row = k / QK_K;
+    const block_q4_Kx8 * blocks = (const block_q4_Kx8 *)p_repacked_blocks;
+
+    for (int i = 0; i < num_blocks_in_row; i++) {
+        const block_q4_Kx8 * current_block = &blocks[i];
+        float * y_block = y + i * QK_K;
+
+        const float d_main   = GGML_FP16_TO_FP32(current_block->d[row_idx_in_group]);
+        const float dmin_main = GGML_FP16_TO_FP32(current_block->dmin[row_idx_in_group]);
+
+        const uint8_t * p_qs_base = current_block->qs;
+        const uint8_t * repacked_scales = (const uint8_t *)current_block->scales;
+
+        uint8_t sc, m;
+
+        for (int j = 0; j < QK_K; j += 64) {
+            const int is = (j / 64) * 2;
+
+            // Get scales/mins for the two sub-blocks as in the original deq func
+            uint8_t sc1, m1_val, sc2, m2_val;
+            {
+                const uint8_t * s_data = &repacked_scales[(is + 0) * 12];
+                get_scale_min_k4(row_idx_in_group, s_data, &sc1, &m1_val);
+            }
+            {
+                const uint8_t * s_data = &repacked_scales[(is + 1) * 12];
+                get_scale_min_k4(row_idx_in_group, s_data, &sc2, &m2_val);
+            }
+            const float d1 = d_main * sc1; const float m1 = dmin_main * m1_val;
+            const float d2 = d_main * sc2; const float m2 = dmin_main * m2_val;
+
+
+            const int chunk_group_start_idx = j / 16;
+
+            for (int chunk_idx = 0; chunk_idx < 4; ++chunk_idx) {
+                const int current_chunk_group = chunk_group_start_idx + chunk_idx;
+                const int qs_group_offset = current_chunk_group * 64;
+                const uint8_t * p_qs_chunk = p_qs_base + qs_group_offset + row_idx_in_group * 8;
+
+                for (int l = 0; l < 8; ++l) {
+                    y_block[j + chunk_idx * 8 + l] = d1 * (p_qs_chunk[l] & 0xF) - m1;
+                }
+            }
+
+            for (int chunk_idx = 0; chunk_idx < 4; ++chunk_idx) {
+                const int current_chunk_group = chunk_group_start_idx + chunk_idx;
+                const int qs_group_offset = current_chunk_group * 64;
+                const uint8_t * p_qs_chunk = p_qs_base + qs_group_offset + row_idx_in_group * 8;
+
+                for (int l = 0; l < 8; ++l) {
+                    y_block[j + 32 + chunk_idx * 8 + l] = d2 * (p_qs_chunk[l] >> 4) - m2;
+                }
+            }
+        }
+    }
+}
+
+
+
+    static inline void get_scale_min_k4(int j, const uint8_t * GGML_RESTRICT s, uint8_t * GGML_RESTRICT d, uint8_t * GGML_RESTRICT m) {
+        if (j < 4) {
+            *d = s[j] & 63; *m = s[j + 4] & 63;
+        } else {
+            *d = (s[j+4] & 0xF) | ((s[j-4] >> 6) << 4);
+            *m = (s[j+4] >>  4) | ((s[j-0] >> 6) << 4);
         }
     }
 
@@ -6461,7 +6607,7 @@ static void ggml_backend_cpu_aarch64_buffer_set_tensor(ggml_backend_buffer_t buf
                                                        const void * data, size_t offset, size_t size) {
     GGML_ASSERT(offset == 0);
     GGML_ASSERT(size == ggml_nbytes(tensor));
-
+    printf("\n In functions - ggml_backend_cpu_aarch64_buffer_set_tensor");
     auto tensor_traits = (ggml::cpu::aarch64::tensor_traits_base *) tensor->extra;
     auto OK            = tensor_traits->repack(tensor, data, size);
 
@@ -6538,7 +6684,7 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
             if (op->src[1]->buffer && !ggml_backend_buft_is_host(op->src[1]->buffer->buft)) {
                 return false;
             }
-            if (op->src[0]->type == GGML_TYPE_Q4_0) {
+            if (op->src[0]->type == GGML_TYPE_Q4_0 || op->src[0]->type == GGML_TYPE_Q4_K) {
                 return true;
             }
         }

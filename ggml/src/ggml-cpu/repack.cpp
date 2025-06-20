@@ -1478,9 +1478,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         float * GGML_RESTRICT y,
         int64_t k,
         int row_idx_in_group) {
-        constexpr int nrows_interleaved = 8;
+
         assert(k % QK_K == 0);
-        assert(row_idx_in_group >= 0 && row_idx_in_group < nrows_interleaved);
+        assert(row_idx_in_group >= 0 && row_idx_in_group < 8);
 
         const int nb = k / QK_K;
         const block_q4_Kx8 * blocks = (const block_q4_Kx8 *)p_repacked_blocks;

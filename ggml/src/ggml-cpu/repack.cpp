@@ -1401,9 +1401,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         const ggml_tensor * src0 = dst->src[0];
 
         switch (src0->type) {
-            case GGML_TYPE_Q4_K: {
+            case GGML_TYPE_Q4_K:
                 ggml_compute_forward_get_rows_q4_Kx8(params, dst);
-            } break;
+                break;
             default:
                 GGML_ABORT("fatal error");
                 break;
@@ -1450,7 +1450,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 
             GGML_ASSERT(i01 >= 0 && i01 < ne01);
 
-            int row_group_idx = i01 / nrows_interleaved;
+            const int row_group_idx = i01 / nrows_interleaved;
             const int row_idx_in_group = i01 % nrows_interleaved;
 
             const char * base_ptr_for_higher_dims_in_src0 = (const char *)src0->data + i11 * nb02 + i12 * nb03;

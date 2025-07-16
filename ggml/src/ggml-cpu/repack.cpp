@@ -1491,7 +1491,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
     }
 
     /**
-     * Dequantizes a single logical row from data repacked with quant interleaving.
+     * Dequantizes a single logical row from data repacked with quant interleaving for repacked block_q4_0x8
      *
      * @param p_repacked_group_column_blocks Pointer to the start of 'block_q4_0x8' for the row group.
      * @param y                              Output buffer for the dequantized float values.

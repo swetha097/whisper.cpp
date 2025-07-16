@@ -1419,7 +1419,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 
         switch (src0->type) {
             case GGML_TYPE_Q4_0: {
-                if (ggml_cpu_has_avx2() || (ggml_cpu_has_sve() && ggml_cpu_has_matmul_int8() && ggml_cpu_get_sve_cnt() == QK8_0)) {
+                if (ggml_cpu_has_avx2()) {
                     if (src0->ne[1] % 8 == 0) {
                         ggml_compute_forward_get_rows_q4_0<block_q4_0x8>(params, dst, 8);
                     }
@@ -1484,7 +1484,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             // Pointer to the first <BLOCK_TYPE> of the identified row_group_idx
             const BLOCK_TYPE * p_first_repacked_block_of_group_block_type = (const BLOCK_TYPE *)(base_ptr_for_higher_dims_in_src0 + row_group_idx * stride_between_actual_row_groups);
 
-            dequantize_row_q4_0<block_q4_0x8>(
+            dequantize_row_q4_0(
                 p_first_repacked_block_of_group_block_type,
                 (float *)((char *)dst->data + i10 * nb1 + i11 * nb2 + i12 * nb3), nc, row_idx_in_group);
         }
@@ -1498,9 +1498,8 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
      * @param k                              Total number of elements (columns) in the logical row.
      * @param row_idx_in_group               Index (0-7) of the logical row to dequantize.
      */
-    template<typename BLOCK_TYPE>
     static void dequantize_row_q4_0(
-        const BLOCK_TYPE * GGML_RESTRICT p_repacked_group_column_blocks,
+        const block_q4_0x8 * GGML_RESTRICT p_repacked_group_column_blocks,
         float * GGML_RESTRICT y,
         int64_t k,
         int row_idx_in_group) {

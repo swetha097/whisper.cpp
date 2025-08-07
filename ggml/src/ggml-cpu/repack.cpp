@@ -1497,55 +1497,60 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
      * @param k                              Total number of elements (columns) in the logical row.
      * @param row_idx_in_group               Index (0-7) of the logical row to dequantize.
      */
-       static void dequantize_row_q2_Kx8(
-        const block_q2_K * GGML_RESTRICT p_repacked_blocks,
+       static void dequantize_row_q2_K(
+        const block_q2_Kx8 * GGML_RESTRICT p_repacked_blocks,
         float * GGML_RESTRICT y,
         int64_t k,
         int row_idx_in_group) {
-
+            printf("Comes here");
+            exit(0);
         // Assert that the number of blocks in the row is a multiple of QK_K
         assert(k % QK_K == 0);
         assert(row_idx_in_group >= 0 && row_idx_in_group < 8);
-
+ 
         const int nb = k / QK_K;
-        const block_q2_K * blocks = (const block_q2_K *) p_repacked_blocks;
-
+        const block_q2_Kx8 * blocks = (const block_q2_Kx8 *) p_repacked_blocks;
+ 
         for (int i = 0; i < nb; i++) {
-            const block_q2_K * ptr_to_current_block = &blocks[i];
-
+            const block_q2_Kx8 * ptr_to_current_block = &blocks[i];
+ 
             const float d_super_block = GGML_FP16_TO_FP32(ptr_to_current_block->d[row_idx_in_group]);
             const float dmin_super_block = GGML_FP16_TO_FP32(ptr_to_current_block->dmin[row_idx_in_group]);
-
+ 
             const uint8_t * ptr_to_qs_base = ptr_to_current_block->qs;
-            const uint8_t * ptr_to_repacked_scales = (const uint8_t *) ptr_to_current_block->scales;
-
+            const uint8_t * ptr_to_repacked_scales = ptr_to_current_block->scales;
+ 
             int is = 0, chunk_group_start_idx = 0;
             for (int j = 0; j < QK_K; j += 128) {
                 int shift = 0;
                 uint8_t sc1, m1_val, sc2, m2_val;
-                const uint8_t *scales_repacked_data;
-                
-                sc1 = &ptr_to_repacked_scales[is++];
-                sc2 = &ptr_to_repacked_scales[is++];
-                
-                // Compute the super block's scale & mins values
-                const float d1 = d_super_block * (sc1 & 0xF);
-                const float m1 = dmin_super_block * (sc1 >> 4);
-                const float d2 = d_super_block * (sc2 & 0xF);
-                const float m2 = dmin_super_block * (sc2 >> 4);
-
+                const uint8_t *scales_repacked_data = (const uint8_t*)ptr_to_repacked_scales[row_idx_in_group * 8];
+               
+ 
                 for (int idx = 0; idx < 4; idx++) {
-                    const uint8_t * ptr_qs_chunk = ptr_to_qs_base + ((chunk_group_start_idx + idx) * 32) + row_idx_in_group * 8; // TODO: Recheck the striding calc
+                    sc1 = ptr_to_repacked_scales[is+16];
+                    sc2 = ptr_to_repacked_scales[is+16];
+                    // Compute the super block's scale & mins values
+                    const float d1 = d_super_block * (sc1 & 0xF);
+                    const float m1 = dmin_super_block * (sc1 >> 4);
+                    const float d2 = d_super_block * (sc2 & 0xF);
+                    const float m2 = dmin_super_block * (sc2 >> 4);
+ 
                     // For 16 elements in the block
-                    for (int l = 0; l < 16; ++l) 
-                        *y++ = dl * ((int8_t)((ptr_qs_chunk[l] >> shift) & 3)) - ml;
-                    for (int l = 0; l < 16; ++l) 
-                        *y++ = d2 * ((int8_t)((ptr_qs_chunk[l] >> shift) & 3)) - m2;
+                    for (int l = 0; l < 8; ++l)
+                        *y++ = d1 * ((int8_t)((ptr_to_qs_base[l + idx] >> shift) & 3)) - m1;
+                    for (int l = 0; l < 8; ++l)
+                        *y++ = d1 * ((int8_t)((ptr_to_qs_base[l+64*idx] >> shift) & 3)) - m1;
+ 
+                    for (int l = 0; l < 8; ++l)
+                        *y++ = d2 * ((int8_t)((ptr_to_qs_base[l+64*2*idx] >> shift) & 3)) - m2;
+                    for (int l = 0; l < 8; ++l)
+                        *y++ = d2 * ((int8_t)((ptr_to_qs_base[l+64*3*idx] >> shift) & 3)) - m2;
                     shift += 2;
                 }
-
+ 
                 // TO process 4 chunks at a time, we increment by 4
-                chunk_group_start_idx += 4;
+                chunk_group_start_idx+=4;
             }
         }
     }

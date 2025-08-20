@@ -1606,7 +1606,8 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         ggml_tensor *       dst  = op;
 
         GGML_TENSOR_BINARY_OP_LOCALS
-
+        // printf("\n ne product : %d\n",ne0 * ne1 * ne2 * ne3);
+        // exit(0);
         const int ith = params->ith;
         const int nth = params->nth;
 
@@ -1847,13 +1848,15 @@ static const ggml::cpu::tensor_traits * ggml_repack_get_optimal_repack_type(cons
                 return &q4_K_8x8_q8_K;
             }
         }
-    } else if (cur->type == GGML_TYPE_Q2_K) {
-        if (ggml_cpu_has_avx512()) {
-            if (cur->ne[1] % 8 == 0) {
-                return &q2_K_8x8_q8_K;
-            }
-        }
-    } else if (cur->type == GGML_TYPE_IQ4_NL) {
+    } 
+    // else if (cur->type == GGML_TYPE_Q2_K) {
+    //     if (ggml_cpu_has_avx512()) {
+    //         if (cur->ne[1] % 8 == 0) {
+    //             return &q2_K_8x8_q8_K;
+    //         }
+    //     }
+    // } 
+    else if (cur->type == GGML_TYPE_IQ4_NL) {
         if (ggml_cpu_has_avx2()) {
             if (cur->ne[1] % 8 == 0) {
                 return &iq4_nl_8x8_q8_0;

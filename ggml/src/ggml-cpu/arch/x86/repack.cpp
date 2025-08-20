@@ -49,6 +49,7 @@ static inline __m512 __avx512_f32cx8x2_load(ggml_fp16_t *x, ggml_fp16_t *y) {
 
     return _mm512_loadu_ps(tmp);
 }
+
 static inline __m512 __avx512_repeat_f32cx16_load(__m128i x) {
     float tmp[16];
     uint16_t tmphalf[8];
@@ -1624,8 +1625,17 @@ void ggml_gemv_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const 
 
     ggml_gemv_iq4_nl_8x8_q8_0_generic(n, s, bs, vx, vy, nr, nc);
 }
+void print_m256f(const __m256 vec) {
+    const float *values = (const float*)&vec;
+    for (int i = 0; i < 8; i++) {
+        printf("%f ", values[i]);
+    }
+    printf("\n");
+}
 
 void ggml_gemv_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+    printf("\n Inside gemv_q2K function");
+    // exit(0);
     const int qk = QK_K;
     const int nb = n / qk;
     const int ncols_interleaved = 8;
@@ -1929,8 +1939,13 @@ void ggml_gemv_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
             // Accumulated output values permuted so as to be stored in appropriate order post accumulation
             acc_row = _mm256_permutevar8x32_ps(acc_row, finalpermutemask);
             _mm256_storeu_ps(s + (y * nr + x * 8), _mm256_sub_ps(acc_row, acc_min_rows));
+            printf("index = %d ",(y * nr + x * 8));
+            printf("\n");
+            printf("sub_ps values = ");
+            print_m256f( _mm256_sub_ps(acc_row, acc_min_rows));
         }
     }
+    // exit(0);
 #else
 
     ggml_gemv_q2_K_8x8_q8_K_generic(n, s, bs, vx, vy, nr, nc);
@@ -3423,7 +3438,10 @@ void ggml_gemm_iq4_nl_8x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const 
     ggml_gemm_iq4_nl_4x4_q8_0(n, s, bs, vx, vy, nr, nc);
 }
 
+
+
 void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+    printf("\n Inside the gemm function");
     const int qk = QK_K;
     const int nb = n / qk;
     const int ncols_interleaved = 8;
@@ -4210,10 +4228,15 @@ void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
             // Store the accumulated values
             for (int i = 0; i < 16; i++) {
                 _mm512_storeu_ps((float * )(s + ((y * 4 + i) * bs + x * 8)), _mm512_sub_ps(acc_rows[i], acc_min_rows[i]));
+                // printf("index = %d",((y * 4 + i) * bs + x * 8));
+                // printf("\n");
+                // printf("sub_ps values = ");
+                // print_m256f(_mm512_sub_ps(acc_rows[i], acc_min_rows[i]));
             }
         }
+        // exit(0);
     }
-
+  
     for (; y < nr / 4; y ++) {
 
         const block_q8_Kx4 * a_ptr = a_ptr_start + (y * nb);
@@ -4938,9 +4961,14 @@ void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
             // Store accumlated values
             for (int i = 0; i < 4; i++) {
                 _mm512_storeu_ps((float * )(s + ((y * 4 + i) * bs + x * 8)), _mm512_sub_ps(acc_rows[i], acc_min_rows[i]));
+                // printf("index = %d",((y * 4 + i) * bs + x * 8));
+                // printf("\n");
+                // printf("sub_ps values = ");
+                // print_m256f(_mm512_sub_ps(acc_rows[i], acc_min_rows[i]));
             }
         }
     }
+    // exit(0);
 
     if (anc != nc) {
         xstart = anc/8;

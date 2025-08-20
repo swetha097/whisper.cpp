@@ -1207,7 +1207,9 @@ void ggml_compute_forward_mul_mat(
     const struct ggml_tensor * src1 = dst->src[1];
 
     GGML_TENSOR_BINARY_OP_LOCALS
-
+    // printf("\n src0->type : %d ", src0->type);
+    // printf("\n ne product : %d\n",ne0 * ne1 * ne2 * ne3);
+    // exit(0);
     const int ith = params->ith;
     const int nth = params->nth;
 
@@ -1391,6 +1393,13 @@ UseGgmlGemm2:;
 
         current_chunk = atomic_fetch_add_explicit(&params->threadpool->current_chunk, 1, memory_order_relaxed);
     }
+    // if (src0->type == 10) {
+    //     float* dstdata = (float*)(dst->data);
+    //     for(int i1 = 0; i1 < 768000; i1++)
+    //         printf("Sum : %f\n", dstdata[i1]);
+    //             // printf("%f, ", dstdata[i1]);
+    //     exit(0);
+    // }
 }
 
 // ggml_compute_forward_mul_mat_id
@@ -2859,10 +2868,37 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.threadpool=*/ tp,
     };
 
+    static int test = 0;
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
         struct ggml_tensor * node = cgraph->nodes[node_n];
+        // printf("\n Node Numer :: %d", node_n);
 
+        if (node_n == 6){
+            test = test+1;
+            int node_prod = node->ne[0] * node->ne[1] * node->ne[2] * node->ne[3];
+            // float* test_data = (float*)(node->data);
+            // for(int c1 = 0; c1 < node_prod; c1++){
+            //     printf("Sum : %f\n", test_data[c1]);
+            // }
+            // printf("\n Node Numer :: %d", node_n);
+            // printf("\n node_prod : %d",node_prod);
+        // exit(0);
+
+        }
         ggml_compute_forward(&params, node);
+        if (node_n == 6 && test == 4){
+            int node_prod = node->ne[0] * node->ne[1] * node->ne[2] * node->ne[3];
+            float* test_data = (float*)(node->data);
+            for(int c1 = 0; c1 < node_prod; c1++){
+                printf("Sum : %f\n", test_data[c1]);
+            }
+            // printf("\n A Node Numer :: %d", node_n);
+            // printf("\n A node_prod : %d",node_prod);
+        // exit(0);
+
+        }
+        if(test == 4)
+            exit(0);
 
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {

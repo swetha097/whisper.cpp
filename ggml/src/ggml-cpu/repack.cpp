@@ -1915,7 +1915,8 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 for (int j = 0; j < 4; ++j) {
 
                     // get the scales needed for the 32 values to be dequantized
-                    const int8_t sc0 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
+                    const uint8_t sc0 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
+                    fprintf(stderr, "scale sc0 =%d ", sc0);
                     dl = d_super_block * (sc0 & 0xF); 
                     ml = dmin_super_block * (sc0 >> 4);
 
@@ -1925,7 +1926,8 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                         fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                     }
 
-                    const int8_t sc1 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
+                    const uint8_t sc1 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
+                    fprintf(stderr, "scale s10 =%d ", sc1);
                     dl = d_super_block * (sc1 & 0xF); 
                     ml = dmin_super_block * (sc1 >> 4);
 

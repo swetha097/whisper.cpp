@@ -1921,8 +1921,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                     ml = dmin_super_block * (sc0 >> 4);
 
                     for (int l = 0; l < 16; ++l) {
-                        float v = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l) >> shift) & 3)) - ml;
-                        *y++ = v;
+                        *y++ = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l) >> shift) & 3)) - ml;
                         // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                     }
 
@@ -1932,8 +1931,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                     ml = dmin_super_block * (sc1 >> 4);
 
                     for (int l = 0; l < 16; ++l) {
-                        float v = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l + 16) >> shift) & 3)) - ml;
-                        *y++ = v;
+                        *y++ = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l + 16) >> shift) & 3)) - ml;
                         // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                     }
 

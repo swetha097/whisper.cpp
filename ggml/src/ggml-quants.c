@@ -804,8 +804,7 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
                 // fprintf(stderr, "scale sc0 =%d ", sc);
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
                 for (int l = 0; l < 16; ++l) {
-                    float v = dl * ((int8_t)((q[l] >> shift) & 3)) - ml;
-                    *y++ = v;
+                    *y++ = dl * ((int8_t)((q[l] >> shift) & 3)) - ml;
                     // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                 }
 
@@ -813,8 +812,7 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
                 // fprintf(stderr, "scale sc1 =%d ", sc);
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
                 for (int l = 0; l < 16; ++l) {
-                    float v = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
-                    *y++ = v;
+                    *y++ = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
                     // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                 }
 

@@ -1897,7 +1897,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
         const int nb = k / QK_K;
         const block_q2_Kx8 * blocks = (const block_q2_Kx8 *)p_repacked_blocks;
         int out_pos = 0;
-        fprintf(stderr, "\n Inside deq");
+        // fprintf(stderr, "\n Inside deq");
         for (int i = 0; i < nb; i++) {
             const block_q2_Kx8 * current_block = &blocks[i];
 
@@ -1909,32 +1909,32 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             uint8_t * ptr_repacked_scales = (uint8_t *)current_block->scales; // 16*8 scales repacked - 2bytes of each super block stored together
             float dl, ml;
             int is = 0;
-            fprintf(stderr, "[Q2Kx8] blk=%d row=%d d=%g dmin=%g\n", i, row_idx_in_group, d_super_block, dmin_super_block);
+            // fprintf(stderr, "[Q2Kx8] blk=%d row=%d d=%g dmin=%g\n", i, row_idx_in_group, d_super_block, dmin_super_block);
             for (int n = 0; n < QK_K; n += 128) {
                 int shift = 0;
                 for (int j = 0; j < 4; ++j) {
 
                     // get the scales needed for the 32 values to be dequantized
                     const uint8_t sc0 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
-                    fprintf(stderr, "scale sc0 =%d ", sc0);
+                    // fprintf(stderr, "scale sc0 =%d ", sc0);
                     dl = d_super_block * (sc0 & 0xF); 
                     ml = dmin_super_block * (sc0 >> 4);
 
                     for (int l = 0; l < 16; ++l) {
                         float v = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l) >> shift) & 3)) - ml;
                         *y++ = v;
-                        fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
+                        // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                     }
 
                     const uint8_t sc1 = read_scale_from_repacked(ptr_repacked_scales, row_idx_in_group, is++);
-                    fprintf(stderr, "scale s10 =%d ", sc1);
+                    // fprintf(stderr, "scale s10 =%d ", sc1);
                     dl = d_super_block * (sc1 & 0xF); 
                     ml = dmin_super_block * (sc1 >> 4);
 
                     for (int l = 0; l < 16; ++l) {
                         float v = dl * ((int8_t)((read_q_from_repacked(ptr_qs_base, row_idx_in_group, n/4 + l + 16) >> shift) & 3)) - ml;
                         *y++ = v;
-                        fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
+                        // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
                     }
 
                     shift +=2;

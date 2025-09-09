@@ -805,6 +805,7 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
                 sc = x[i].scales[is++];
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
                 for (int l = 0; l < 16; ++l) *y++ = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
+
                 shift += 2;
             }
             q += 32;

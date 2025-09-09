@@ -21,7 +21,6 @@
 #if defined(__GNUC__)
 #pragma GCC diagnostic ignored "-Woverlength-strings"
 #endif
-#include <stdio.h>
 #define UNUSED GGML_UNUSED
 
 static inline int nearest_int(float fval) {

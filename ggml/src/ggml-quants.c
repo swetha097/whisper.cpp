@@ -784,7 +784,7 @@ void quantize_row_q2_K_ref(const float * GGML_RESTRICT x, block_q2_K * GGML_REST
 void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {
     assert(k % QK_K == 0);
     const int nb = k / QK_K;
-    int out_pos = 0;
+
     for (int i = 0; i < nb; i++) {
 
         const float d = GGML_FP16_TO_FP32(x[i].d);
@@ -800,13 +800,11 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
 
                 uint8_t sc = x[i].scales[is++];
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
-                for (int l = 0; l < 16; ++l)
-                    *y++ = dl * ((int8_t)((q[l] >> shift) & 3)) - ml;
+                for (int l = 0; l < 16; ++l) *y++ = dl * ((int8_t)((q[l] >> shift) & 3)) - ml;
 
                 sc = x[i].scales[is++];
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
-                for (int l = 0; l < 16; ++l)
-                    *y++ = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
+                for (int l = 0; l < 16; ++l) *y++ = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
                 shift += 2;
             }
             q += 32;

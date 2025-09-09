@@ -785,7 +785,6 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
     assert(k % QK_K == 0);
     const int nb = k / QK_K;
     int out_pos = 0;
-    // fprintf(stderr, "\n Inside deq");
     for (int i = 0; i < nb; i++) {
 
         const float d = GGML_FP16_TO_FP32(x[i].d);
@@ -795,27 +794,19 @@ void dequantize_row_q2_K(const block_q2_K * GGML_RESTRICT x, float * GGML_RESTRI
 
         int is = 0;
         float dl, ml;
-        // fprintf(stderr, "[Q2Kx8] blk=%d d=%g dmin=%g\n", i, d, min);
         for (int n = 0; n < QK_K; n += 128) {
             int shift = 0;
             for (int j = 0; j < 4; ++j) {
 
                 uint8_t sc = x[i].scales[is++];
-                // fprintf(stderr, "scale sc0 =%d ", sc);
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
-                for (int l = 0; l < 16; ++l) {
+                for (int l = 0; l < 16; ++l)
                     *y++ = dl * ((int8_t)((q[l] >> shift) & 3)) - ml;
-                    // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
-                }
 
                 sc = x[i].scales[is++];
-                // fprintf(stderr, "scale sc1 =%d ", sc);
                 dl = d * (sc & 0xF); ml = min * (sc >> 4);
-                for (int l = 0; l < 16; ++l) {
+                for (int l = 0; l < 16; ++l)
                     *y++ = dl * ((int8_t)((q[l+16] >> shift) & 3)) - ml;
-                    // fprintf(stderr, "y[%d] = %.8f\n", out_pos++, v);
-                }
-
                 shift += 2;
             }
             q += 32;

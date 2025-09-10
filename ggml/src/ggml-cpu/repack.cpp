@@ -2143,14 +2143,8 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
             const float d_super_block = GGML_FP16_TO_FP32(current_block->d[row_idx_in_group]);
 
             const uint8_t * ptr_ql_base = current_block->ql;
-            // printf("\n Comes after current_block->ql");
             const uint8_t * ptr_qh_base = current_block->qh;
-            // printf("\n Comes after current_block->qh");
             uint8_t * ptr_repacked_scales = (uint8_t *)current_block->scales; // 16*8 scales repacked - 2bytes of each super block stored together
-            // printf("\n Comes current_block->scales");
-            // float* y_dest = y + i * QK_K;
-            // int is = 0, chunk_group_start_idx = 0;
-            // uint8_t sc[8];
             for (int n = 0; n < QK_K; n += 128) {
                 for (int l = 0; l < 32; ++l) {
                     int is = l/16;
@@ -2177,11 +2171,7 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                     y[l + 96] = d_super_block * sc3 * q4;
                 }
                 y  += 128;
-                // ql += 64;
-                // qh += 32;
-               ptr_repacked_scales = (uint8_t *)current_block->scales + 64; 
-            //    ptr_ql_base = (uint8_t *) current_block->ql + 64;
-            //     ptr_qh_base = (uint8_t *) current_block->qh + 32;
+               ptr_repacked_scales = (uint8_t *)current_block->scales + 64;
             }
         }
     }

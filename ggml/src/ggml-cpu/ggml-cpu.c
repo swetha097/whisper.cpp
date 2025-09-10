@@ -14,6 +14,7 @@
 #include "vec.h"
 #include "ops.h"
 #include "ggml.h"
+#include <ctype.h>
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
 #include <malloc.h> // using malloc.h with MSC/MINGW
@@ -49,7 +50,7 @@
 #ifdef GGML_USE_LLAMAFILE
 #include "llamafile/sgemm.h"
 #endif
-
+#define DUMP_OUTPUT_DIR "before_changes_2"
 // Note: once we move threading into a separate C++ file
 // will use std::hardware_destructive_interference_size instead of hardcoding it here
 // and we'll use C++ attribute syntax.
@@ -2842,6 +2843,96 @@ struct ggml_cplan ggml_graph_plan(
     return cplan;
 }
 
+
+// Helper function to dump a tensor's contents to a file
+
+// STEP 1: Make sure these includes are at the top of your .c file
+#include <ctype.h>    // For isalnum()
+#include <inttypes.h> // For PRId64 macro to print int64_t types
+#include <string.h>   // For strlen()
+
+// A safe, reusable sanitization function.
+// It copies src to dst, replacing invalid filename characters with '_'.
+static void sanitize_string_for_filename(char * dst, const char * src, size_t dst_size) {
+    if (!dst || !src || dst_size == 0) return;
+
+    size_t i = 0;
+    for (i = 0; i < dst_size - 1 && src[i] != '\0'; ++i) {
+        char c = src[i];
+        dst[i] = (isalnum((unsigned char)c) || c == '_' || c == '-') ? c : '_';
+    }
+    dst[i] = '\0'; // Ensure null-termination
+}
+
+// The final, corrected helper function with the node operation in the filename// The final, corrected helper function with the node operation in the filename
+static inline void dump_tensor_to_file(const struct ggml_tensor * tensor, int node_index, const char * output_dir) {
+    // Extra safety: print the address of the tensor itself. If this is garbage, you'll know.
+    // printf("DEBUG: Dumping node %d at tensor address %p\n", node_index, (void*)tensor);
+
+    if (!tensor) {
+        fprintf(stderr, "ERROR: dump_tensor_to_file called with NULL tensor for node %d\n", node_index);
+        return;
+    }
+
+    // --- 1. Get and Sanitize Names with extra safety ---
+    char sanitized_name[128];
+    const char* original_name = "unnamed"; // Default
+    if (tensor->name != NULL && tensor->name[0] != '\0') {
+        original_name = tensor->name;
+    }
+    sanitize_string_for_filename(sanitized_name, original_name, sizeof(sanitized_name));
+
+    char sanitized_op[64];
+    sanitize_string_for_filename(sanitized_op, ggml_op_name(tensor->op), sizeof(sanitized_op));
+
+    // --- 2. Create the filename ---
+    char filename[256];
+    snprintf(filename, sizeof(filename), "%s/node_%03d_%s_%s.txt",
+             output_dir,
+             node_index,
+             sanitized_op,
+             sanitized_name);
+
+    FILE * f = fopen(filename, "w");
+    if (!f) {
+        fprintf(stderr, "Failed to open %s for writing\n", filename);
+        return;
+    }
+
+    // --- 3. Write Metadata ---
+    fprintf(f, "--- Tensor Metadata ---\n");
+    fprintf(f, "Tensor Address: %p\n", (void*)tensor); // Log the address
+    fprintf(f, "Data Address:   %p\n", tensor->data);   // Log the data address
+    fprintf(f, "Original Name:  %s\n", original_name);
+    // ... rest of metadata ...
+    fprintf(f, "Elements:       %" PRId64 "\n", ggml_nelements(tensor));
+
+    const int64_t n_elements = ggml_nelements(tensor);
+
+    switch (tensor->type) {
+        case GGML_TYPE_F32: {
+            float * data = (float *)tensor->data;
+            for (int64_t i = 0; i < n_elements; ++i) {
+                fprintf(f, "[%" PRId64 "] = %f\n", i, data[i]);
+            }
+            break;
+        }
+        case GGML_TYPE_F16: {
+            ggml_fp16_t * data = (ggml_fp16_t *)tensor->data;
+            for (int64_t i = 0; i < n_elements; ++i) {
+                fprintf(f, "[%" PRId64 "] = %f\n", i, ggml_fp16_to_fp32(data[i]));
+            }
+            break;
+        }
+        default: {
+            fprintf(f, "Data dump for type %s is not implemented in this helper.\n", ggml_type_name(tensor->type));
+            break;
+        }
+    }
+        
+    fclose(f);
+}
+
 static thread_ret_t ggml_graph_compute_thread(void * data) {
     struct ggml_compute_state * state = (struct ggml_compute_state *) data;
     struct ggml_threadpool    * tp    = state->threadpool;
@@ -2859,11 +2950,31 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
         /*.threadpool=*/ tp,
     };
 
+    // STEP 2: Create the directory if it doesn't exist.
+    // In C++, you would use std::filesystem, but for C, this is a common approach.
+    struct stat st = {0};
+    if (stat(DUMP_OUTPUT_DIR, &st) == -1) {
+        mkdir(DUMP_OUTPUT_DIR, 0700);
+    }
+
     for (int node_n = 0; node_n < cgraph->n_nodes && atomic_load_explicit(&tp->abort, memory_order_relaxed) != node_n; node_n++) {
+        // printf("Node_n is %d\n", node_n);
         struct ggml_tensor * node = cgraph->nodes[node_n];
 
         ggml_compute_forward(&params, node);
+        // STEP 3: Call the dump function for every node after it's computed.
+        // if (node_n < 50)
+           dump_tensor_to_file(node, node_n, DUMP_OUTPUT_DIR);
+        
 
+        
+        // {
+        //     int node_prod = node->ne[0] * node->ne[1] * node->ne[2] * node->ne[3];
+        //     float* test_data = (float*)(node->data);
+        //     for(int c1 = 0; c1 < node_prod; c1++){
+        //         printf("Sum : %f\n", test_data[c1]);
+        //     } 
+        // }
         if (state->ith == 0 && cplan->abort_callback &&
                 cplan->abort_callback(cplan->abort_callback_data)) {
             atomic_store_explicit(&tp->abort, node_n + 1, memory_order_relaxed);
@@ -2874,7 +2985,7 @@ static thread_ret_t ggml_graph_compute_thread(void * data) {
             ggml_barrier(state->threadpool);
         }
     }
-
+    exit(0);
     ggml_barrier(state->threadpool);
 
     return 0;

@@ -20,7 +20,12 @@ build_*/
 .build/
 .swiftpm
 *.metallib
-
+clang_build/
+clang_build_with_llamafile_sgemm/
+clang_build_without_llamafile_sgemm/
+gcc_build/
+gcc_build_with_llamafile_sgemm/
+gcc_build_without_llamafile_sgemm/
 ggml-metal-embed.metal
 ggml-metal-embed.metal.tmp
 

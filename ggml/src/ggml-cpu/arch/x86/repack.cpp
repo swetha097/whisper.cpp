@@ -3429,6 +3429,9 @@ void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
     const int ncols_interleaved = 8;
     const int blocklen = 8;
 
+    static int i1 = 0;
+    i1 = i1 + 1;
+
     assert (n % qk == 0);
     assert (nr % 4 == 0);
     assert (nc % ncols_interleaved == 0);
@@ -3470,6 +3473,10 @@ void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
 #ifdef __AVX512F__
 
     int anc = nc - nc % 16; // Used to align nc with boundary of 16
+    if(anc != nc) {
+        printf("Goes inside AVX2 condition\n");
+        exit(0);
+    }
 
     // Mask to mask out nibbles from packed bytes
     const __m256i m4b = _mm256_set1_epi8(0x0F);
@@ -4951,7 +4958,6 @@ void ggml_gemm_q2_K_8x8_q8_K(int n, float * GGML_RESTRICT s, size_t bs, const vo
 
     // Take group of four block_q8_Kx4 structures at each pass of the loop and perform dot product operation
     for (; y < anr / 4; y += 4) {
-
         const block_q8_Kx4 * a_ptrs[4];
 
         a_ptrs[0] = a_ptr_start + (y * nb);

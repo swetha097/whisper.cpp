@@ -1948,6 +1948,11 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 
                     return true;
                 }
+                case GGML_OP_GET_ROWS:
+                {
+                    size = 0;  // GET_ROWS (standard and repacked) doesn't need a work buffer
+                    return true;
+                }
             default:
                 // GGML_ABORT("fatal error");
                 break;
@@ -1962,6 +1967,9 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
                 return true;
             case GGML_OP_MUL_MAT_ID:
                 forward_mul_mat_id(params, op);
+                return true;
+            case GGML_OP_GET_ROWS:
+                forward_get_rows(params, op);
                 return true;
             default:
                 // GGML_ABORT("fatal error");
@@ -2171,7 +2179,21 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
 #undef MMID_MATRIX_ROW
     }
 
-static void ggml_compute_forward_get_rows_q3_Kx8(
+    void forward_get_rows(const ggml_compute_params * params,
+                            ggml_tensor * dst) {
+            const ggml_tensor * src0 = dst->src[0];
+
+            switch (src0->type) {
+                case GGML_TYPE_Q3_K:
+                    ggml_compute_forward_get_rows_q3_Kx8(params, dst);
+                    break;
+                default:
+                    GGML_ABORT("fatal error");
+                    break;
+            }
+        }
+
+    static void ggml_compute_forward_get_rows_q3_Kx8(
         const ggml_compute_params * params,
         ggml_tensor * dst) {
         const ggml_tensor * src0 = dst->src[0];
@@ -2234,73 +2256,98 @@ static void ggml_compute_forward_get_rows_q3_Kx8(
      * @param row_idx_in_group  The index (0-7) of the logical row to extract from the interleaved data.
      */
 
-    static inline uint8_t read_byte_interleaved8(const uint8_t * base, int row_idx_in_group, int byte_index) {
-        const int block_size_interleave  = 8;
-        const int chunk_idx = byte_index / block_size_interleave;
-        const int offset_in_chunk = byte_index % block_size_interleave;
-        const int offset = chunk_idx * (8 * block_size_interleave) + row_idx_in_group * block_size_interleave + offset_in_chunk;
-        return base[offset];
+
+// Corrected helper to read a byte from the interleaved qs/hmask arrays for a specific logical row
+static inline uint8_t read_byte_interleaved8(const uint8_t * base, int row_idx_in_group, int original_byte_idx_in_q3k_array) {
+    const int block_size_interleave = 8;
+    const int chunk_idx = original_byte_idx_in_q3k_array / block_size_interleave;
+    const int offset_in_chunk = original_byte_idx_in_q3k_array % block_size_interleave;
+    const int offset = (chunk_idx * 8 + row_idx_in_group) * block_size_interleave + offset_in_chunk;
+    return base[offset];
+}
+
+// Corrected helper to read a scale from the repacked scales array
+static inline int8_t read_scale_from_repacked_q3k(const uint8_t* ptr_repacked_scales, int row_idx_in_group, int scale_idx_in_original_block) {
+    const int group_id = scale_idx_in_original_block / 4;
+    const int base_repacked_section_offset = group_id * 24;
+
+    const int sub_group_idx = (scale_idx_in_original_block % 4) / 2;
+    const uint8_t low_bits_packed_byte = ptr_repacked_scales[base_repacked_section_offset + sub_group_idx * 12 + row_idx_in_group];
+
+    uint8_t s_low_bits;
+    if (scale_idx_in_original_block % 2 == 0) {
+        s_low_bits = low_bits_packed_byte & 0x0F;
+    } else {
+        s_low_bits = (low_bits_packed_byte >> 4) & 0x0F;
     }
 
-    static inline int8_t read_scale_from_repacked_q3k(const uint8_t* ptr_repacked_scales, int row_idx_in_group, int scale_idx) {
-        const int pair_group_idx = scale_idx / 2;
-        const int sub_idx_in_pair = scale_idx % 2;
-        const int offset = pair_group_idx * 16 + row_idx_in_group * 2 + sub_idx_in_pair;
-        return (int8_t) ptr_repacked_scales[offset];
+    const int high_bits_byte_offset_in_section = base_repacked_section_offset + sub_group_idx * 12 + 8 + (row_idx_in_group % 4);
+    const uint8_t high_bits_packed_byte = ptr_repacked_scales[high_bits_byte_offset_in_section];
+
+    uint8_t s_high_bits;
+    const int bit_shift_base = (row_idx_in_group / 4) * 2;
+    if (scale_idx_in_original_block % 2 == 0) {
+        s_high_bits = (high_bits_packed_byte >> bit_shift_base) & 0x03;
+    } else {
+        s_high_bits = (high_bits_packed_byte >> (bit_shift_base + 4)) & 0x03;
     }
 
-    static void dequantize_row_q3_Kx8(
-        const void * GGML_RESTRICT p_repacked_blocks,
-        float * GGML_RESTRICT y,
-        int64_t k,
-        int row_idx_in_group) {
-        assert(k % QK_K == 0);
-        assert(row_idx_in_group >= 0 && row_idx_in_group < 8);
+    return (int8_t)(s_low_bits | (s_high_bits << 4));
+}
 
-        const int nb = k / QK_K;
-        const block_q3_Kx8 * blocks = (const block_q3_Kx8 *)p_repacked_blocks;
+// Corrected dequantization function
+static void dequantize_row_q3_Kx8(
+    const void * GGML_RESTRICT p_repacked_blocks,
+    float * GGML_RESTRICT y,
+    int64_t k,
+    int row_idx_in_group) {
+    assert(k % QK_K == 0);
+    assert(row_idx_in_group >= 0 && row_idx_in_group < 8);
 
-        for (int i = 0; i < nb; i++) {
-            const block_q3_Kx8 * current_block = &blocks[i];
+    const int nb = k / QK_K;
+    const block_q3_Kx8 * blocks = (const block_q3_Kx8 *)p_repacked_blocks;
 
-            const float d_super_block = GGML_FP16_TO_FP32(current_block->d[row_idx_in_group]);
+    for (int i_block = 0; i_block < nb; i_block++) {
+        const block_q3_Kx8 * current_block = &blocks[i_block];
+        const float d_super_block = GGML_FP16_TO_FP32(current_block->d[row_idx_in_group]);
 
-            const uint8_t * ptr_qs_base = current_block->qs;
-            const uint8_t * ptr_hm_base = current_block->hmask;
-            const uint8_t * ptr_repacked_scales = (const uint8_t *)current_block->scales; 
+        const uint8_t * ptr_qs_base = current_block->qs;
+        const uint8_t * ptr_hm_base = current_block->hmask;
+        const uint8_t * ptr_repacked_scales = (const uint8_t *)current_block->scales;
 
-            for (int n = 0; n < QK_K; n += 128) {
-                for (int l = 0; l < 32; ++l) {
-                    const int is = l / 16; // 0 for first 16, 1 for second 16
+        int is_scale = 0;
+        uint8_t m = 1;
 
-                    // 4 scales for 4 groups of 16 in this half
-                    const int8_t sc0 = read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is + 0);
-                    const int8_t sc1 = read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is + 2);
-                    const int8_t sc2 = read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is + 4);
-                    const int8_t sc3 = read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is + 6);
+        for (int j = 0; j < 8; ++j) {
+            const float dl_0 = d_super_block * (read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is_scale++) - 32);
+            const float dl_1 = d_super_block * (read_scale_from_repacked_q3k(ptr_repacked_scales, row_idx_in_group, is_scale++) - 32);
+            
+            const int original_qs_offset = j * 8;
+            const int original_hm_offset = j * 4;
 
-                    // read interleaved bytes for this row
-                    const uint8_t qs_l0   = read_byte_interleaved8(ptr_qs_base, row_idx_in_group, n/2 + l +  0);
-                    const uint8_t qs_l32  = read_byte_interleaved8(ptr_qs_base, row_idx_in_group, n/2 + l + 32);
-                    const uint8_t hm_byte = read_byte_interleaved8(ptr_hm_base, row_idx_in_group, n/4 + l);
-
-                    // reconstruct 4 lanes (bitplanes 0..3 from hm)
-                    const int8_t q1 = (int8_t)((qs_l0  >> 0) & 0x3) - ((hm_byte & (1u << 0)) ? 0 : 4);
-                    const int8_t q2 = (int8_t)((qs_l32 >> 0) & 0x3) - ((hm_byte & (1u << 1)) ? 0 : 4);
-                    const int8_t q3 = (int8_t)((qs_l0  >> 2) & 0x3) - ((hm_byte & (1u << 2)) ? 0 : 4);
-                    const int8_t q4 = (int8_t)((qs_l32 >> 2) & 0x3) - ((hm_byte & (1u << 3)) ? 0 : 4);
-
-                    y[l +   0] = d_super_block * (sc0 - 32) * q1;
-                    y[l +  32] = d_super_block * (sc1 - 32) * q2;
-                    y[l +  64] = d_super_block * (sc2 - 32) * q3;
-                    y[l +  96] = d_super_block * (sc3 - 32) * q4;
-                }
-                y  += 128;
+            for (int l = 0; l < 16; ++l) {
+                const uint8_t current_qs_byte = read_byte_interleaved8(ptr_qs_base, row_idx_in_group, original_qs_offset + (l / 4));
+                const uint8_t current_hm_byte = read_byte_interleaved8(ptr_hm_base, row_idx_in_group, original_hm_offset + (l / 8));
                 
-                ptr_repacked_scales = (const uint8_t *)current_block->scales + 64;
+                const int8_t q_val = (int8_t)((current_qs_byte >> ((l % 4) * 2)) & 3) - ((current_hm_byte & m) ? 0 : 4);
+                
+                y[i_block * QK_K + j * 32 + l] = dl_0 * q_val;
             }
+
+            for (int l = 0; l < 16; ++l) {
+                const uint8_t current_qs_byte = read_byte_interleaved8(ptr_qs_base, row_idx_in_group, original_qs_offset + 4 + (l / 4));
+                const uint8_t current_hm_byte = read_byte_interleaved8(ptr_hm_base, row_idx_in_group, original_hm_offset + 2 + (l / 8));
+                
+                const int8_t q_val = (int8_t)((current_qs_byte >> ((l % 4) * 2)) & 3) - ((current_hm_byte & m) ? 0 : 4);
+                
+                y[i_block * QK_K + j * 32 + 16 + l] = dl_1 * q_val;
+            }
+
+            m <<= 1;
         }
     }
+}
+
     
     int repack(struct ggml_tensor * t, const void * data, size_t data_size) override {
         GGML_LOG_DEBUG("%s: repack tensor %s with %s_%dx%d\n", __func__, t->name, ggml_type_name(t->type),
@@ -2459,12 +2506,23 @@ class extra_buffer_type : ggml::cpu::extra_buffer_type {
             //if (op->src[1]->type == GGML_TYPE_Q8_0) {
             //    return true;
             //}
+        } else if (op->op == GGML_OP_GET_ROWS
+        && op->src[0]->buffer
+        && (ggml_n_dims(op->src[0]) == 2)
+        && op->src[0]->buffer->buft == ggml_backend_cpu_repack_buffer_type()
+        && ggml_repack_get_optimal_repack_type(op->src[0])) {
+        if (op->src[1]->buffer && !ggml_backend_buft_is_host(op->src[1]->buffer->buft)) {
+            return false;
+        }
+        if (op->src[0]->type == GGML_TYPE_Q3_K) {
+            return true;
+        }
         }
         return false;
     }
 
     ggml::cpu::tensor_traits * get_tensor_traits(const struct ggml_tensor * op) override {
-        if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_MUL_MAT_ID) {
+        if (op->op == GGML_OP_MUL_MAT || op->op == GGML_OP_MUL_MAT_ID || op->op == GGML_OP_GET_ROWS) {
             if (op->src[0]->buffer && op->src[0]->buffer->buft == ggml_backend_cpu_repack_buffer_type()) {
                 return (ggml::cpu::tensor_traits *) op->src[0]->extra;
             }
